@@ -17,6 +17,8 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y ffmpeg
           pip install -U yt-dlp awscli
+          curl -fsSL https://deno.land/install.sh | sh
+          echo "$HOME/.deno/bin" >> $GITHUB_PATH
 
       - name: Build safe filename
         id: meta
@@ -34,7 +36,7 @@ jobs:
           # Waits on an in-progress live stream and records until it ends.
           # Add --live-from-start below if the broadcaster has DVR/rewind enabled
           # and you want the recording to start from the actual beginning.
-          yt-dlp --no-part -f "best[ext=mp4]/best" -o "output/recording.mp4" "$URL"
+          yt-dlp --no-playlist --no-part -f "best[ext=mp4]/best" -o "output/recording.mp4" "$URL"
 
       - name: Upload to Cloudflare R2
         env:
