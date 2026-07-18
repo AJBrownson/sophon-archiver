@@ -36,7 +36,7 @@ jobs:
           # Waits on an in-progress live stream and records until it ends.
           # Add --live-from-start below if the broadcaster has DVR/rewind enabled
           # and you want the recording to start from the actual beginning.
-          yt-dlp --no-playlist --no-part -f "best[ext=mp4]/best" -o "output/recording.mp4" "$URL"
+          yt-dlp --no-playlist --no-part -f "best[ext=mp4]/best" --extractor-args "youtube:player_client=web" -o "output/recording.mp4" "$URL"
 
       - name: Upload to Cloudflare R2
         env:
