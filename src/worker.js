@@ -91,18 +91,41 @@ async function handleListRecordings(env) {
 
 async function handleWatch(request, env, url) {
   const key = decodeURIComponent(url.pathname.replace('/api/watch/', ''));
-  const object = await env.BUCKET.get(key);
+
+  const rangeHeader = request.headers.get('range');
+  const getOptions = {};
+  if (rangeHeader) {
+    const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+    if (match) {
+      const start = parseInt(match[1], 10);
+      const end = match[2] ? parseInt(match[2], 10) : undefined;
+      getOptions.range = end !== undefined ? { offset: start, length: end - start + 1 } : { offset: start };
+    }
+  }
+
+  const object = rangeHeader
+    ? await env.BUCKET.get(key, getOptions)
+    : await env.BUCKET.get(key);
+
   if (!object) return new Response('Not found', { status: 404 });
 
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set('etag', object.httpEtag);
-  if (!headers.has('content-type')) {
-    headers.set('content-type', 'video/mp4');
-  }
+  headers.set('accept-ranges', 'bytes');
+  const contentType = key.endsWith('.ts') ? 'video/mp2t' : 'video/mp4';
+  headers.set('content-type', contentType);
   if (url.searchParams.get('download') === '1') {
     headers.set('content-disposition', `attachment; filename="${key}"`);
   }
+
+  if (rangeHeader && object.range) {
+    const { offset, length } = object.range;
+    const totalSize = object.size;
+    headers.set('content-range', `bytes ${offset}-${offset + length - 1}/${totalSize}`);
+    return new Response(object.body, { status: 206, headers });
+  }
+
   return new Response(object.body, { headers });
 }
 
