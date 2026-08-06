@@ -8,7 +8,7 @@ jobs:
   record:
     runs-on: ubuntu-latest
     # GitHub hosted runners hard-cap at 6 hours per job; leave a safety buffer
-    timeout-minutes: 340
+    timeout-minutes: 355
     steps:
       - name: Install yt-dlp, ffmpeg, awscli
         env:
@@ -31,23 +31,47 @@ jobs:
       - name: Write cookies file
         run: echo "${{ secrets.YT_COOKIES }}" > cookies.txt
         
-      - name: Capture live stream
+      - name: Capture live stream with periodic safety sync
         env:
           URL: ${{ github.event.client_payload.url }}
-        run: |
-          mkdir -p output
-          # Waits on an in-progress live stream and records until it ends.
-          # Add --live-from-start below if the broadcaster has DVR/rewind enabled
-          # and you want the recording to start from the actual beginning.
-          # yt-dlp --no-part --no-playlist --cookies cookies.txt -f "best[ext=mp4]/best" -o "output/recording.mp4" "$URL"
-          yt-dlp --no-part --no-playlist --cookies cookies.txt --remote-components ejs:github -f "best[ext=mp4]/best" -o "output/recording.mp4" "$URL"
-
-      - name: Upload to Cloudflare R2
-        env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           AWS_DEFAULT_REGION: auto
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+          FILENAME: ${{ steps.meta.outputs.filename }}
         run: |
-          aws s3 cp output/recording.mp4 \
-            "s3://${{ secrets.R2_BUCKET }}/${{ steps.meta.outputs.filename }}" \
-            --endpoint-url "${{ secrets.R2_ENDPOINT }}"
+          mkdir -p output
+          RAW="output/recording.ts"
+          SAFETY_KEY="in-progress/${FILENAME%.mp4}.ts"
+
+          (
+            while true; do
+              sleep 300
+              if [ -f "$RAW" ]; then
+                aws s3 cp "$RAW" "s3://${R2_BUCKET}/${SAFETY_KEY}" --endpoint-url "$R2_ENDPOINT" || true
+              fi
+            done
+          ) &
+          SYNC_PID=$!
+
+          # Prefer combined mp4 formats delivered over HLS (mpegts output grows
+          # while recording, enabling the periodic safety sync above). Falls back
+          # to any mp4, then anything.
+          yt-dlp --no-part --no-playlist --cookies cookies.txt --hls-use-mpegts \
+            --live-from-start --remote-components ejs:github \
+            -f "best[ext=mp4][protocol^=m3u8]/best[ext=mp4]/best" \
+            -o "$RAW" "$URL"
+          YT_EXIT=$?
+
+          kill "$SYNC_PID" 2>/dev/null || true
+
+          if [ "$YT_EXIT" -eq 0 ] && [ -f "$RAW" ]; then
+            ffmpeg -fflags +genpts -avoid_negative_ts make_zero -i "$RAW" \
+              -c copy -movflags +faststart "output/recording.mp4"
+            aws s3 cp "output/recording.mp4" "s3://${R2_BUCKET}/${FILENAME}" --endpoint-url "$R2_ENDPOINT"
+            aws s3 rm "s3://${R2_BUCKET}/${SAFETY_KEY}" --endpoint-url "$R2_ENDPOINT" || true
+          else
+            aws s3 cp "$RAW" "s3://${R2_BUCKET}/${SAFETY_KEY}" --endpoint-url "$R2_ENDPOINT" || true
+            exit 1
+          fi
