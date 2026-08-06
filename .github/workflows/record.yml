@@ -55,11 +55,12 @@ jobs:
           ) &
           SYNC_PID=$!
 
-          # Prefer combined HLS streams (mpegts output grows while recording,
-          # enabling the periodic safety sync above). Falls back to anything.
+          # Prefer combined mp4 formats delivered over HLS (mpegts output grows
+          # while recording, enabling the periodic safety sync above). Falls back
+          # to any mp4, then anything.
           yt-dlp --no-part --no-playlist --cookies cookies.txt --hls-use-mpegts \
             --live-from-start --remote-components ejs:github \
-            -f "best[protocol^=m3u8]/best" \
+            -f "best[ext=mp4][protocol^=m3u8]/best[ext=mp4]/best" \
             -o "$RAW" "$URL"
           YT_EXIT=$?
 
@@ -71,8 +72,6 @@ jobs:
             aws s3 cp "output/recording.mp4" "s3://${R2_BUCKET}/${FILENAME}" --endpoint-url "$R2_ENDPOINT"
             aws s3 rm "s3://${R2_BUCKET}/${SAFETY_KEY}" --endpoint-url "$R2_ENDPOINT" || true
           else
-            echo "Recording failed; dumping available formats for diagnosis:"
-            yt-dlp --cookies cookies.txt -F "$URL" || true
             aws s3 cp "$RAW" "s3://${R2_BUCKET}/${SAFETY_KEY}" --endpoint-url "$R2_ENDPOINT" || true
             exit 1
           fi
