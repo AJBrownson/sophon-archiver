@@ -2,7 +2,7 @@ name: cleanup-logs
 
 on: 
   workflow_run:
-    workflows: ["record-live"]
+    workflow: ["record-live"]
     types: [completed]
 
 permissions:

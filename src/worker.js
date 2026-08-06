@@ -80,7 +80,6 @@ async function handleStatus(env) {
 async function handleListRecordings(env) {
   const listed = await env.BUCKET.list();
   const items = listed.objects
-    .filter((obj) => !obj.key.startsWith('in-progress/'))
     .sort((a, b) => new Date(b.uploaded) - new Date(a.uploaded))
     .map((obj) => ({
       key: obj.key,
